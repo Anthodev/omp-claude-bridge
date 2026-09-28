@@ -50,7 +50,7 @@ Authentication and billing run through Claude Code and your Anthropic subscripti
 - **Switchable context window** — force **1M** or **200K** globally, or leave it on measured per-model defaults. This is the headline addition in this fork.
 - **Session resume & persistence** — conversations survive across turns and reconnects.
 - **Skills + AGENTS.md forwarding** — your OMP skills and context files are passed into Claude Code's system prompt.
-- **Thinking support** — effort levels map through to Claude Code, including `xhigh` on Sonnet models.
+- **Thinking support** — effort levels map through to Claude Code, including `xhigh`; on Sonnet 5 / 4.6 `xhigh` is translated to Claude Code's `max` effort, while the 5.5-generation models accept `xhigh` natively.
 - **MCP tool bridging** with strict-config isolation by default.
 
 ## Install
@@ -73,12 +73,12 @@ omp plugin install ./omp-claude-bridge
 
 </details>
 
-Requires Oh My Pi (`omp`) and a working Claude Code login.
+Requires Oh My Pi (`omp`) **>= 18.4.2 < 19** and a working Claude Code login.
 
 ## Quickstart
 
 1. Install the plugin (above).
-2. In OMP, run `/model` and choose a `claude-bridge/*` model — for example `claude-bridge/claude-sonnet-5`.
+2. In OMP, run `/model` and choose a `claude-bridge/*` model — for example `claude-bridge/claude-sonnet-5-5`.
 3. Work as usual. Tool calls run through OMP's TUI; Claude Code handles the model turn.
 
 To delegate from another provider instead, just ask: *"Ask Claude to review this plan and poke holes in it."*
@@ -116,6 +116,9 @@ Both windows stay in the picker regardless of this setting (wherever a runtime e
 
 | Model | 200K entry | 1M entry | `auto` default |
 | ----- | :--------: | :------: | :------------: |
+| `claude-fable-5-1` | — | ✓ | 1M |
+| `claude-opus-5-5` | — | ✓ | 1M |
+| `claude-sonnet-5-5` | — | ✓ | 1M |
 | `claude-opus-4-8` | ✓ | ✓ | 1M |
 | `claude-opus-4-7` | — | ✓ | 1M |
 | `claude-opus-4-6` | ✓ | ✓ | 200K¹ |
@@ -139,18 +142,25 @@ Pick any of these from `/model` — each entry shows a `(1M)` or `(200K)` label.
 
 | Picker id (auto) | Window |
 | --------- | ------ |
+| `claude-bridge/claude-fable-5-1` | 1M |
 | `claude-bridge/claude-fable-5` | 200K |
 | `claude-bridge/claude-fable-5-1m` | 1M |
+| `claude-bridge/claude-opus-5-5` | 1M |
 | `claude-bridge/claude-opus-4-8` | 1M |
 | `claude-bridge/claude-opus-4-8-200k` | 200K |
 | `claude-bridge/claude-opus-4-7` | 1M |
 | `claude-bridge/claude-opus-4-6` | 200K (1M on Max / Extra Usage) |
 | `claude-bridge/claude-opus-4-6-1m` | 1M |
+| `claude-bridge/claude-sonnet-5-5` | 1M |
 | `claude-bridge/claude-sonnet-5` | 1M (supports `xhigh`) |
 | `claude-bridge/claude-sonnet-5-200k` | 200K |
 | `claude-bridge/claude-sonnet-4-6` | 200K (supports `xhigh`) |
 | `claude-bridge/claude-sonnet-4-6-1m` | 1M |
 | `claude-bridge/claude-haiku-4-5` | 200K (cheapest) |
+
+`claude-fable-5-1`, `claude-opus-5-5`, and `claude-sonnet-5-5` are **natively 1M-context**: they appear only as a single 1M entry, and even with `provider.contextWindow: "200k"` the unsuffixed id keeps working and is served 1M (fallback). An explicit `<model>-200k` id is rejected as unsupported at runtime.
+
+> Model availability still depends on your Claude account and subscription — the plugin's list is what it can route, not a guarantee your plan serves every entry (e.g. Sonnet 5.5 / Opus 5.5 require an entitled account).
 
 Bash commands issued by Claude Code get a 120-second default timeout (matching Claude Code's default), since OMP's bash has no timeout by default.
 
@@ -172,7 +182,7 @@ You can also bake it into a skill or AGENTS.md, e.g. *"Always call AskClaude to 
 | --------- | ------ | ----------- |
 | `prompt` | string | The question or task for Claude Code. |
 | `mode` | `read` (default), `none`, `full` | `read` = read files + web; `full` = read/write/bash. Lock `full` out with `allowFullMode: false`. |
-| `model` | `opus` (default), `sonnet`, `haiku`, or a full id | Which Claude model handles the delegation. |
+| `model` | `opus` (default), `sonnet`, `haiku`, `fable`, or a full id | Which Claude model handles the delegation. Shortcuts resolve to the newest model of each family: `opus` → `claude-opus-5-5`, `sonnet` → `claude-sonnet-5-5`, `fable` → `claude-fable-5-1`, `haiku` → `claude-haiku-4-5`. Full ids always win over shortcuts. |
 | `thinking` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh` | Effort level. |
 | `isolated` | boolean (default `false`) | When `true`, Claude gets a clean session with no conversation history. |
 

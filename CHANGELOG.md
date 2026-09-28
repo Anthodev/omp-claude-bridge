@@ -4,6 +4,29 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Claude Fable 5.1 (`claude-fable-5-1`), Claude Opus 5.5 (`claude-opus-5-5`), and
+  Claude Sonnet 5.5 (`claude-sonnet-5-5`) in the model picker. All three are
+  natively 1M-context: they register a single 1M entry (with a 1M fallback when
+  `provider.contextWindow: "200k"`), and an explicit `<model>-200k` id is
+  rejected as unsupported. AskClaude shortcuts now resolve to the newest model
+  per family: `opus` → Opus 5.5, `sonnet` → Sonnet 5.5, `fable` → Fable 5.1
+  (`haiku` stays on 4.5). Exact ids always win over substring shortcuts.
+
+### Changed
+- Requires Oh My Pi `>=18.4.2 <19`: the five `@oh-my-pi/*` packages are pinned
+  to `18.4.2` (was `16.3.11`), the Claude Agent SDK to `0.3.284`, and the
+  Anthropic SDK to `0.93.0` (`@modelcontextprotocol/sdk` and `zod` are now
+  direct dependencies). Extension loading is restored against the removed
+  `keybinding-hints` module via `keyHint` and direct use of the legacy
+  pi-ai shim; AskClaude is registered with `loadMode: "essential"`.
+- Reasoning metadata now projects the catalog's `thinking` contract
+  (`efforts`/`effortMap`) instead of the retired `thinkingLevelMap`; Sonnet 5 /
+  4.6 keep translating `xhigh` → `max`, while the 5.5-generation models accept
+  `xhigh` natively. Usage accounting uses the canonical `reasoningTokens` field.
+
 ## [0.8.1] - 2026-07-07
 
 ### Fixed

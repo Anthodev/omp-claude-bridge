@@ -6,10 +6,13 @@ import { buildVariantModels, claudeCodeModelId, parseVariantId } from "../src/mo
 // Minimal stand-ins for pi-ai model entries (buildVariantModels reads id, name,
 // contextWindow and spreads the rest through to each variant).
 const MODELS = [
+	{ id: "claude-fable-5-1", name: "Fable 5.1", contextWindow: 1_000_000 },
 	{ id: "claude-fable-5", name: "Fable 5", contextWindow: 1_000_000 },
+	{ id: "claude-opus-5-5", name: "Opus 5.5", contextWindow: 1_000_000 },
 	{ id: "claude-opus-4-8", name: "Opus 4.8", contextWindow: 200_000 },
 	{ id: "claude-opus-4-7", name: "Opus 4.7", contextWindow: 1_000_000 },
 	{ id: "claude-opus-4-6", name: "Opus 4.6", contextWindow: 200_000 },
+	{ id: "claude-sonnet-5-5", name: "Sonnet 5.5", contextWindow: 1_000_000 },
 	{ id: "claude-sonnet-5", name: "Sonnet 5", contextWindow: 200_000 },
 	{ id: "claude-sonnet-4-6", name: "Sonnet 4.6", contextWindow: 200_000 },
 	{ id: "claude-haiku-4-5", name: "Haiku 4.5", contextWindow: 200_000 },
@@ -46,11 +49,15 @@ test("auto (Pro): each model expands to its available windows with correct ids, 
 	assert.ok(!m["claude-haiku-4-5-1m"], "haiku has no 1M runtime");
 });
 
-test("auto (Pro): 12 entries, and no base model emits two entries for the same window", () => {
+test("auto (Pro): 15 entries, and no base model emits two entries for the same window", () => {
 	const list = variants("auto");
-	assert.equal(list.length, 12);
+	assert.equal(list.length, 15);
 	for (const base of MODELS.map((mm) => mm.id)) {
-		const windows = list.filter((v) => v.id === base || v.id.startsWith(`${base}-`)).map((v) => v.contextWindow);
+		// Suffix-aware grouping: an exact id like claude-fable-5-1 shares the
+		// claude-fable-5- prefix but is its own model, not a -1m/-200k variant.
+		const windows = list
+			.filter((v) => v.id === base || (v.id.startsWith(`${base}-`) && ["1m", "200k"].includes(v.id.slice(base.length + 1))))
+			.map((v) => v.contextWindow);
 		assert.equal(new Set(windows).size, windows.length, `${base} has duplicate windows`);
 	}
 });
@@ -114,6 +121,46 @@ test("claudeCodeModelId: a suffixed id forces its window regardless of config", 
 test("claudeCodeModelId throws when a model has no runtime for the requested window", () => {
 	assert.throws(() => claudeCodeModelId({ id: "claude-haiku-4-5-1m" }, settings("auto")));
 	assert.throws(() => claudeCodeModelId({ id: "claude-opus-4-7-200k" }, settings("auto")));
-	assert.throws(() => claudeCodeModelId({ id: "claude-haiku-4-5" }, settings("1m")));
-	assert.throws(() => claudeCodeModelId({ id: "claude-opus-4-7" }, settings("200k")));
+});
+
+test("a model with only one window remains usable under the opposite global preference", () => {
+	assert.equal(claudeCodeModelId({ id: "claude-haiku-4-5" }, settings("1m")), "claude-haiku-4-5");
+	assert.equal(claudeCodeModelId({ id: "claude-opus-4-7" }, settings("200k")), "claude-opus-4-7");
+});
+
+// The three 2.1.284-era models are natively 1M on direct Anthropic access:
+// exactly one unsuffixed 1M entry per id under every config mode, and no
+// 200K runtime at all.
+const NEW_MODEL_IDS = ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5"];
+const NEW_MODEL_BASE_NAMES = { "claude-fable-5-1": "Fable 5.1", "claude-opus-5-5": "Opus 5.5", "claude-sonnet-5-5": "Sonnet 5.5" };
+
+test("new 1M-native models: exactly one unsuffixed 1M entry per id under every config mode", () => {
+	for (const id of NEW_MODEL_IDS) {
+		for (const mode of ["auto", "1m", "200k"]) {
+			const entries = variants(mode).filter((v) => v.id === id || v.id.startsWith(`${id}-`));
+			assert.equal(entries.length, 1, `${id} under ${mode}: exactly one registered entry`);
+			assert.equal(entries[0].id, id, `${id} under ${mode}: bare id, no -1m/-200k suffix`);
+			assert.equal(entries[0].contextWindow, 1_000_000, `${id} under ${mode}: native 1M window`);
+			assert.equal(entries[0].name, `${NEW_MODEL_BASE_NAMES[id]} (1M)`, `${id} under ${mode}: 1M label`);
+		}
+	}
+});
+
+test("new 1M-native models: every registered bare id resolves to its 1M CLI runtime", () => {
+	for (const id of NEW_MODEL_IDS) {
+		for (const mode of ["auto", "1m", "200k"]) {
+			const registered = variants(mode).find((v) => v.id === id);
+			assert.equal(registered.contextWindow, 1_000_000);
+			assert.equal(claudeCodeModelId(registered, settings(mode)), id, `${id}: ${mode} serves the bare CLI id`);
+		}
+	}
+});
+
+test("new 1M-native models: an explicit -200k id rejects because no 200K runtime exists", () => {
+	for (const id of NEW_MODEL_IDS) {
+		assert.throws(
+			() => claudeCodeModelId({ id: `${id}-200k` }, settings("200k")),
+			/model .* has no Claude Code runtime \(contextWindow=200k\)/,
+		);
+	}
 });

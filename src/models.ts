@@ -1,32 +1,85 @@
+import type { EffortLevel } from "@anthropic-ai/claude-agent-sdk";
+
 // Canonical selection + display order for the model picker.
 // `resolveModel` returns the first partial match, so `opus` resolves to the first-listed opus entry.
 // Extracted from index.ts so tests can import without activating the extension.
 
-export const MODEL_IDS_IN_ORDER = ["claude-fable-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-4-5"];
+// Newer Claude models absent from pi-catalog's models.json; declared here with
+// explicit, doc-attested capabilities so buildModels can register them even when
+// the catalog omits them. All three are natively 1M-context and support xhigh.
+export const CLAUDE_CODE_MODEL_ADDITIONS = [
+	{
+		id: "claude-fable-5-1",
+		name: "Claude Fable 5.1",
+		reasoning: true,
+		input: ["text", "image"],
+		contextWindow: 1_000_000,
+		maxTokens: 128_000,
+		thinking: { mode: "effort", efforts: ["low", "medium", "high", "xhigh", "max"], effortMap: { xhigh: "xhigh" } },
+	},
+	{
+		id: "claude-opus-5-5",
+		name: "Claude Opus 5.5",
+		reasoning: true,
+		input: ["text", "image"],
+		contextWindow: 1_000_000,
+		maxTokens: 128_000,
+		thinking: { mode: "effort", efforts: ["low", "medium", "high", "xhigh", "max"], effortMap: { xhigh: "xhigh" } },
+	},
+	{
+		id: "claude-sonnet-5-5",
+		name: "Claude Sonnet 5.5",
+		reasoning: true,
+		input: ["text", "image"],
+		contextWindow: 1_000_000,
+		maxTokens: 128_000,
+		thinking: { mode: "effort", efforts: ["low", "medium", "high", "xhigh", "max"], effortMap: { xhigh: "xhigh" } },
+	},
+] as const;
 
-// Workaround for models that ship without a thinkingLevelMap. Sonnet 5 and
-// Sonnet 4.6 have no map, so getSupportedThinkingLevels hides xhigh (it's
-// opt-in). Both models' top effort tier is "max" with no real xhigh (verified
-// via Claude Code's supportedModels API), so xhigh->max matches opus-4-6.
-const DEFAULT_THINKING_LEVEL_MAPS: Record<string, Record<string, string>> = {
-	"claude-sonnet-5": { xhigh: "max" },
-	"claude-sonnet-4-6": { xhigh: "max" },
+export const MODEL_IDS_IN_ORDER = [
+	"claude-fable-5-1",
+	"claude-fable-5",
+	"claude-opus-5-5",
+	"claude-opus-4-8",
+	"claude-opus-4-7",
+	"claude-opus-4-6",
+	"claude-sonnet-5-5",
+	"claude-sonnet-5",
+	"claude-sonnet-4-6",
+	"claude-haiku-4-5",
+];
+
+const DEFAULT_EFFORT_BY_REASONING: Readonly<Record<string, EffortLevel>> = {
+	minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "max", max: "max",
 };
+
+export function resolveClaudeEffort(
+	reasoning: string | undefined,
+	effortMap?: Readonly<Record<string, string>>,
+): EffortLevel | undefined {
+	if (!reasoning || reasoning === "off") return undefined;
+	const mapped = effortMap && Object.hasOwn(effortMap, reasoning) ? effortMap[reasoning] : undefined;
+	if (mapped === "low" || mapped === "medium" || mapped === "high" || mapped === "xhigh" || mapped === "max") return mapped;
+	return Object.hasOwn(DEFAULT_EFFORT_BY_REASONING, reasoning) ? DEFAULT_EFFORT_BY_REASONING[reasoning] : undefined;
+}
 
 // Project pi-ai's model entries down to the fields OMP's registerProvider expects,
 // and keep MODEL_IDS_IN_ORDER ordering. IDs missing from pi-ai are silently dropped.
 // Context-dependent display labels are applied after plan/long-context config is known.
 export function buildModels<T extends { id: string; [key: string]: any }>(piAiModels: T[]) {
 	return MODEL_IDS_IN_ORDER
-		.map((id) => piAiModels.find((m) => m.id === id))
+		.map((id) => CLAUDE_CODE_MODEL_ADDITIONS.find((m) => m.id === id) ?? piAiModels.find((m) => m.id === id))
 		.filter((m) => m != null)
-		// Forward thinkingLevelMap so per-model overrides (e.g. opus-4-7 mapping
-		// xhigh->xhigh instead of xhigh->max) are visible to the effort lookup.
-		.map(({ id, name, reasoning, input, contextWindow, maxTokens, thinkingLevelMap }) => ({
+		.map(({ id, name, reasoning, input, contextWindow, maxTokens, thinking }) => ({
 			id,
 			name,
 			reasoning, input, contextWindow, maxTokens,
-			thinkingLevelMap: thinkingLevelMap ?? DEFAULT_THINKING_LEVEL_MAPS[id],
+			...(thinking === undefined ? {} : {
+				thinking: id === "claude-sonnet-5" || id === "claude-sonnet-4-6"
+					? { ...thinking, effortMap: { ...thinking.effortMap, xhigh: "max" } }
+					: thinking,
+			}),
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		}));
 }
@@ -69,6 +122,11 @@ export function resolveClaudeCodeRuntimeModel(modelId: string, settings: LongCon
 
 function resolveAutoRuntimeModel(modelId: string, settings: LongContextSettings): ClaudeCodeRuntimeModel {
 	switch (modelId) {
+		case "claude-fable-5-1":
+		case "claude-opus-5-5":
+		case "claude-sonnet-5-5":
+			// Native 1M context on direct Anthropic access; no 200K variant exists.
+			return { cliModelId: modelId, contextWindow: ONE_M_CONTEXT };
 		case "claude-opus-4-8":
 			return { cliModelId: "claude-opus-4-8[1m]", contextWindow: ONE_M_CONTEXT };
 		case "claude-opus-4-7":
@@ -99,6 +157,10 @@ function resolveAutoRuntimeModel(modelId: string, settings: LongContextSettings)
 
 function resolveForcedOneMRuntimeModel(modelId: string): ClaudeCodeRuntimeModel | null {
 	switch (modelId) {
+		case "claude-fable-5-1":
+		case "claude-opus-5-5":
+		case "claude-sonnet-5-5":
+			return { cliModelId: modelId, contextWindow: ONE_M_CONTEXT };
 		case "claude-opus-4-8":
 			return { cliModelId: "claude-opus-4-8[1m]", contextWindow: ONE_M_CONTEXT };
 		case "claude-opus-4-7":
@@ -121,6 +183,10 @@ function resolveForcedOneMRuntimeModel(modelId: string): ClaudeCodeRuntimeModel 
 
 function resolveForcedTwoHundredKRuntimeModel(modelId: string): ClaudeCodeRuntimeModel | null {
 	switch (modelId) {
+		case "claude-fable-5-1":
+		case "claude-opus-5-5":
+		case "claude-sonnet-5-5":
+			return null;
 		case "claude-opus-4-8":
 			return { cliModelId: "claude-opus-4-8", contextWindow: TWO_HUNDRED_K_CONTEXT };
 		case "claude-opus-4-7":
@@ -141,6 +207,21 @@ function resolveForcedTwoHundredKRuntimeModel(modelId: string): ClaudeCodeRuntim
 	}
 }
 
+// Windows a known model can actually run in, in probe order (1M before 200K).
+// Registration (buildVariantModels) and the bare-id runtime fallback
+// (claudeCodeModelId) must agree on this order, or the picker could offer an
+// entry whose id resolves to a throwing runtime. Unknown ids return [] without
+// probing, so the "no known ... runtime" logs stay reserved for truly unknown ids.
+function availableWindowRuntimes(modelId: string): ClaudeCodeRuntimeModel[] {
+	if (!MODEL_IDS_IN_ORDER.includes(modelId)) return [];
+	const runtimes: ClaudeCodeRuntimeModel[] = [];
+	const oneM = resolveForcedOneMRuntimeModel(modelId);
+	if (oneM != null) runtimes.push(oneM);
+	const twoHundredK = resolveForcedTwoHundredKRuntimeModel(modelId);
+	if (twoHundredK != null) runtimes.push(twoHundredK);
+	return runtimes;
+}
+
 // Split a registered picker id into its base model id and the forced window it
 // encodes. Variant ids carry a "-1m"/"-200k" suffix (see buildVariantModels); the
 // unsuffixed id maps to the config default. Base ids never end in those suffixes,
@@ -153,21 +234,35 @@ export function parseVariantId(id: string): { baseId: string; forced?: "1m" | "2
 
 export function claudeCodeModelId(model: { id: string }, settings: LongContextSettings): string {
 	const { baseId, forced } = parseVariantId(model.id);
-	const runtimeModel = forced === "1m"
-		? resolveForcedOneMRuntimeModel(baseId)
-		: forced === "200k"
-			? resolveForcedTwoHundredKRuntimeModel(baseId)
-			: resolveClaudeCodeRuntimeModel(baseId, settings);
+	// An explicit -1m/-200k variant forces its window and must reject when the
+	// model has no runtime for it (see buildVariantModels, which never registers
+	// such a variant).
+	if (forced != null) {
+		const forcedRuntime = forced === "1m"
+			? resolveForcedOneMRuntimeModel(baseId)
+			: resolveForcedTwoHundredKRuntimeModel(baseId);
+		if (forcedRuntime == null) {
+			throw new Error(`claude-bridge: model ${model.id} has no Claude Code runtime (contextWindow=${forced})`);
+		}
+		return forcedRuntime.cliModelId;
+	}
+	// Unsuffixed id: the configured default window — or, for known models whose
+	// only window differs from the global preference (1M-native additions under
+	// "200k", Haiku under "1m", Opus 4.7 under "200k"), the same fallback order
+	// buildVariantModels registers: probe 1M before 200K. Unknown ids keep the
+	// current path (auto's 200K default; a forced window hides them).
+	const runtimeModel = resolveClaudeCodeRuntimeModel(baseId, settings) ?? availableWindowRuntimes(baseId)[0] ?? null;
 	if (runtimeModel == null) {
-		const requested = forced ?? settings.contextWindow;
-		throw new Error(`claude-bridge: model ${model.id} has no Claude Code runtime (contextWindow=${requested})`);
+		throw new Error(`claude-bridge: model ${model.id} has no Claude Code runtime (contextWindow=${settings.contextWindow})`);
 	}
 	return runtimeModel.cliModelId;
 }
 
 export function resolveModel<T extends { id: string }>(models: T[], input: string): T | undefined {
 	const lower = input.toLowerCase();
-	return models.find((m) => m.id === lower || m.id.includes(lower));
+	// Exact match first: substring matching would e.g. route "claude-sonnet-5-5"
+	// or "fable-5-1" to their shorter predecessors.
+	return models.find((m) => m.id === lower) ?? models.find((m) => m.id.includes(lower));
 }
 
 function variantName(baseName: string, contextWindow: number): string {
@@ -200,9 +295,10 @@ export function buildVariantModels<T extends { id: string; name: string; context
 		}
 
 		// Known models always have at least one available window.
-		const available: Array<{ kind: "1m" | "200k"; contextWindow: number }> = [];
-		if (resolveForcedOneMRuntimeModel(m.id) != null) available.push({ kind: "1m", contextWindow: ONE_M_CONTEXT });
-		if (resolveForcedTwoHundredKRuntimeModel(m.id) != null) available.push({ kind: "200k", contextWindow: TWO_HUNDRED_K_CONTEXT });
+		const available: Array<{ kind: "1m" | "200k"; contextWindow: number }> = availableWindowRuntimes(m.id).map((r) => ({
+			kind: r.contextWindow === ONE_M_CONTEXT ? "1m" : "200k",
+			contextWindow: r.contextWindow,
+		}));
 
 		// The config default decides which window is unsuffixed; fall back to the sole
 		// available window when the preferred one has no runtime (e.g. Haiku under
